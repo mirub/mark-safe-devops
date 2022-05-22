@@ -1,0 +1,115 @@
+version: "3.7"
+
+services:
+    mark-safe-frontend:
+      image: gitlab.cs.pub.ro:5050/mark-safe/mark-safe-frontend
+      ports:
+        - 3000:3000
+      networks:
+        - app
+
+    mongodb:
+      image: mongo:latest
+      volumes:
+        - mongo_volume:/data/db
+      networks:
+        - app
+
+    rabbit:
+      image: rabbitmq:3.10.1-management-alpine
+      ports:
+        - 15672:15672 
+      networks:
+        - app
+
+    notification-delivery:
+      image: gitlab.cs.pub.ro:5050/mark-safe/mark-safe-backend
+      depends_on:
+        - mongodb
+        - rabbit
+      command: "npm run start-notification-delivery"
+      networks:
+        - app
+
+    mark-safe-backend:
+      image: gitlab.cs.pub.ro:5050/mark-safe/mark-safe-backend
+      logging:
+        driver: loki
+        options:
+          loki-url: http://172.17.0.1:3100/loki/api/v1/push
+          loki-external-labels: job=myjob,owner=mark-safe,environment=development
+      ports:
+        - 8080:8080
+      depends_on:
+        - mongodb
+        - rabbit
+      command: "npm run start-http"
+      networks:
+        - app
+
+    loki:
+      image: grafana/loki:2.1.0
+      volumes:
+        - /home/mirub/Proiect/loki/loki.yml:/etc/config/loki.yml
+        - /home/mirub/Proiect/loki/wal:/wal
+      entrypoint:
+        - /usr/bin/loki
+        - -config.file=/etc/config/loki.yml
+      ports:
+        - 3100:3100
+      networks:
+        - app
+
+    grafana:
+      image: grafana/grafana
+      volumes:
+        - grafana_volume:/var/lib/grafana
+      ports:
+        - 10000:3000
+      depends_on:
+        - loki
+      deploy:
+        placement:
+          constraints: [node.role == manager]
+      networks:
+        - app
+   
+    prometheus:
+      image: prom/prometheus
+      volumes:
+        - /home/mirub/Proiect/prometheus/prometheus-nexporter-cadvisor.yml:/etc/prometheus/prometheus.yml
+      ports:
+        - 9090:9090
+      networks:
+        - app
+
+    kong:
+        image: kong:latest
+        volumes:
+            - /home/mirub/Proiect/kong:/usr/local/kong/declarative
+        environment:
+            KONG_DATABASE: 'off'
+            KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
+            KONG_PROXY_ACCESS_LOG: /dev/stdout
+            KONG_ADMIN_ACCESS_LOG: /dev/stdout
+            KONG_PROXY_ERROR_LOG: /dev/stderr
+            KONG_ADMIN_ERROR_LOG: /dev/stderr
+            KONG_ADMIN_LISTEN: 0.0.0.0:8001, 0.0.0.0:8444 ssl
+        ports:
+            - 8005:8000
+            - 8443:8443
+            - 8001:8001
+            - 8444:8444
+        deploy:
+            placement:
+                constraints: [node.role == manager]
+        networks:
+            - app
+
+volumes:
+  mongo_volume: {}
+  grafana_volume: {}
+
+networks:
+  app:
+
